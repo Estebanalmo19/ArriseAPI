@@ -29,3 +29,6 @@ htmlcov/
 # Logs
 *.log
 logs/
+
+# Local document storage (development only)
+data/
