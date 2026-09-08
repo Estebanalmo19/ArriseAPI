@@ -1,11 +1,12 @@
 import hashlib
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 import app.documents as documents_module
-from app.documents import CHUNK_SIZE, _stream_to_temp_file, ingest_document
+from app.documents import _stream_to_temp_file, ingest_document
 
 ENDPOINT = "/api/v1/documents"
 
@@ -159,6 +160,13 @@ def test_correlation_id_too_long_returns_400(client):
     assert resp.status_code == 400
 
 
+def test_original_filename_too_long_returns_400(client):
+    long_filename = "a" * 252 + ".pdf"  # 256 characters total
+    assert len(long_filename) == 256
+    resp = _post(client, VALID_FIELDS, long_filename, b"content", "application/pdf")
+    assert resp.status_code == 400
+
+
 def test_unsupported_extension_returns_400(client):
     resp = _post(client, VALID_FIELDS, "malware.exe", b"content", "application/octet-stream")
     assert resp.status_code == 400
@@ -217,29 +225,37 @@ def test_file_exceeding_max_size_returns_413(client, storage_root, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_streaming_rejects_over_limit_without_full_buffering(tmp_path):
-    """Isolated unit test of the streaming limit: bounded memory, no 100 MiB allocation."""
+async def test_streaming_rejects_over_limit_after_multiple_small_chunks(tmp_path):
+    """Genuine multi-chunk streaming: each read() returns a chunk smaller than
+    the configured limit, so the limit is only crossed after several loop
+    iterations - proving the size check is enforced incrementally rather than
+    against a single fully-buffered read. No 100 MiB object is ever allocated."""
 
     class FakeUploadFile:
-        def __init__(self, total_size, chunk_size):
+        def __init__(self, total_size, read_size):
             self._remaining = total_size
-            self._chunk_size = chunk_size
+            self._read_size = read_size
+            self.read_calls = 0
 
         async def read(self, size):
+            self.read_calls += 1
             if self._remaining <= 0:
                 return b""
-            n = min(size, self._remaining, self._chunk_size)
+            n = min(size, self._remaining, self._read_size)
             self._remaining -= n
             return b"x" * n
 
+    max_size = 10 * 1024  # 10 KiB
+    read_size = 2 * 1024  # each read() returns at most 2 KiB, well under max_size
     tmp_file = tmp_path / "big.part"
-    fake_upload = FakeUploadFile(total_size=50 * 1024, chunk_size=CHUNK_SIZE)
+    fake_upload = FakeUploadFile(total_size=50 * 1024, read_size=read_size)
 
     with pytest.raises(HTTPException) as exc_info:
-        await _stream_to_temp_file(fake_upload, tmp_file, max_size=10 * 1024)
+        await _stream_to_temp_file(fake_upload, tmp_file, max_size=max_size)
 
     assert exc_info.value.status_code == 413
     assert not tmp_file.exists()
+    assert fake_upload.read_calls >= 3
 
 
 # --- Simulated filesystem failure (500, no internal detail leaked) ---------
@@ -307,9 +323,15 @@ class _FakeUploadFile:
 
 
 @pytest.mark.anyio
-async def test_upload_file_closed_on_success(tmp_path):
+async def test_upload_file_closed_on_success(tmp_path, monkeypatch):
+    async def succeeding_insert(pool, **fields):
+        return None
+
+    monkeypatch.setattr(documents_module, "insert_document", succeeding_insert)
+
     fake = _FakeUploadFile("data.csv", b"a,b\n1,2", "text/csv")
     result = await ingest_document(
+        request=SimpleNamespace(state=SimpleNamespace()),
         service="doc-processor",
         document_name="Invoice",
         source_system="power_automate",
@@ -317,6 +339,7 @@ async def test_upload_file_closed_on_success(tmp_path):
         correlation_id="corr-1",
         file=fake,
         storage_root=tmp_path,
+        pool=object(),
     )
     assert result.status == "RECEIVED"
     assert fake.closed is True
@@ -327,6 +350,7 @@ async def test_upload_file_closed_on_validation_failure(tmp_path):
     fake = _FakeUploadFile("data.csv", b"a,b\n1,2", "text/csv")
     with pytest.raises(HTTPException):
         await ingest_document(
+            request=SimpleNamespace(state=SimpleNamespace()),
             service="Invalid Service!",
             document_name="Invoice",
             source_system="power_automate",
@@ -334,6 +358,7 @@ async def test_upload_file_closed_on_validation_failure(tmp_path):
             correlation_id="corr-1",
             file=fake,
             storage_root=tmp_path,
+            pool=object(),
         )
     assert fake.closed is True
 
@@ -343,6 +368,7 @@ async def test_missing_content_type_rejected(tmp_path):
     fake = _FakeUploadFile("invoice.pdf", b"content", content_type=None)
     with pytest.raises(HTTPException) as exc_info:
         await ingest_document(
+            request=SimpleNamespace(state=SimpleNamespace()),
             service="doc-processor",
             document_name="Invoice",
             source_system="power_automate",
@@ -350,6 +376,56 @@ async def test_missing_content_type_rejected(tmp_path):
             correlation_id="corr-1",
             file=fake,
             storage_root=tmp_path,
+            pool=object(),
         )
     assert exc_info.value.status_code == 400
     assert fake.closed is True
+
+
+# --- correlation_id/source_system validated-before-stored ordering --------
+
+
+@pytest.mark.anyio
+async def test_invalid_correlation_id_not_stored_in_request_state(tmp_path):
+    """correlation_id is validated first; if it fails, no value - valid or
+    otherwise - is ever placed in request.state."""
+    fake = _FakeUploadFile("data.csv", b"a,b\n1,2", "text/csv")
+    request_state = SimpleNamespace()
+    with pytest.raises(HTTPException) as exc_info:
+        await ingest_document(
+            request=SimpleNamespace(state=request_state),
+            service="doc-processor",
+            document_name="Invoice",
+            source_system="power_automate",
+            document_type="invoice",
+            correlation_id="a" * 129,  # exceeds the 128-character limit
+            file=fake,
+            storage_root=tmp_path,
+            pool=object(),
+        )
+    assert exc_info.value.status_code == 400
+    assert not hasattr(request_state, "correlation_id")
+    assert not hasattr(request_state, "source_system")
+
+
+@pytest.mark.anyio
+async def test_invalid_source_system_not_stored_in_request_state(tmp_path):
+    """A valid correlation_id is stored as soon as it validates; an invalid
+    source_system that fails immediately afterward is never stored."""
+    fake = _FakeUploadFile("data.csv", b"a,b\n1,2", "text/csv")
+    request_state = SimpleNamespace()
+    with pytest.raises(HTTPException) as exc_info:
+        await ingest_document(
+            request=SimpleNamespace(state=request_state),
+            service="doc-processor",
+            document_name="Invoice",
+            source_system="   ",  # blank after strip
+            document_type="invoice",
+            correlation_id="corr-1",
+            file=fake,
+            storage_root=tmp_path,
+            pool=object(),
+        )
+    assert exc_info.value.status_code == 400
+    assert request_state.correlation_id == "corr-1"
+    assert not hasattr(request_state, "source_system")
