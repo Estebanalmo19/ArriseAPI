@@ -144,15 +144,30 @@ Store (SecureString) in a later increment - that retrieval is not implemented he
 
 ### Database
 
-- Database name: `arrise_api`, schema: `public`.
-- Migration: `migrations/0001_create_documents_and_request_logs.sql` (plain SQL,
-  run manually against a local PostgreSQL instance you provide - there is no
-  migration framework in this increment). Apply it with, e.g.:
+- Development/VM layout: database `arrise_vm_db`, schema `arrise_api`. The
+  application never relies on `search_path` - every SQL statement in this
+  repository (migration, purge script, and application queries) refers to
+  tables using the fully schema-qualified name (`arrise_api.documents`,
+  `arrise_api.request_logs`).
+- Migration: `migrations/0001_create_documents_and_request_logs.sql` (plain
+  SQL, run manually - there is no migration framework in this increment).
+  It creates the `arrise_api` schema (`CREATE SCHEMA IF NOT EXISTS
+  arrise_api;`) and both tables inside it. It must be executed by a
+  database owner or a dedicated migration role with `CREATE` privilege on
+  `arrise_vm_db` - it does not create a database, role, or user, and it
+  grants no privileges. Apply it with, e.g.:
   ```powershell
-  psql -d arrise_api -f migrations/0001_create_documents_and_request_logs.sql
+  psql -d arrise_vm_db -f migrations/0001_create_documents_and_request_logs.sql
   ```
-- Two tables: `documents` (one row per successfully ingested document) and
-  `request_logs` (one row per API request, including failed ones).
+- Two tables: `arrise_api.documents` (one row per successfully ingested
+  document) and `arrise_api.request_logs` (one row per API request,
+  including failed ones).
+- The application's own database user does not need schema-creation
+  rights; it only needs `SELECT`/`INSERT`/`UPDATE` on the two tables. The
+  current development user cannot create roles and is not a superuser, so
+  a dedicated least-privilege production application role must eventually
+  be created by an administrator with role-creation rights - that role
+  creation and its grants are not part of this increment.
 - Document files remain on the local filesystem; PostgreSQL stores only
   metadata and a **relative** `storage_key` (e.g.
   `received/doc-processor/550e8400-e29b-41d4-a716-446655440000.pdf`) - the
@@ -219,10 +234,10 @@ consulted in this increment.** Trusted-proxy IP resolution will be
 configured once Nginx/Uvicorn are deployed in front of this service.
 
 Retention is 90 days. Document records are never auto-deleted; only
-`request_logs` rows are. Run manually, or schedule externally (not wired up
-in this increment):
+`arrise_api.request_logs` rows are. Run manually, or schedule externally
+(not wired up in this increment):
 ```powershell
-psql -d arrise_api -f scripts/purge_old_request_logs.sql
+psql -d arrise_vm_db -f scripts/purge_old_request_logs.sql
 ```
 
 ## Secrets

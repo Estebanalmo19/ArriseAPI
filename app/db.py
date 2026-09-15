@@ -5,7 +5,7 @@ from fastapi import Request
 from psycopg_pool import AsyncConnectionPool
 
 INSERT_DOCUMENT_SQL = """
-    INSERT INTO documents (
+    INSERT INTO arrise_api.documents (
         document_id, service, document_name, source_system, document_type,
         correlation_id, original_filename, stored_filename, storage_backend,
         storage_key, mime_type, size_bytes, sha256, status
@@ -17,7 +17,7 @@ INSERT_DOCUMENT_SQL = """
 """
 
 INSERT_REQUEST_LOG_SQL = """
-    INSERT INTO request_logs (
+    INSERT INTO arrise_api.request_logs (
         request_id, correlation_id, document_id, method, endpoint, source_system,
         client_ip, http_status, duration_ms, bytes_received, result, error_code
     ) VALUES (

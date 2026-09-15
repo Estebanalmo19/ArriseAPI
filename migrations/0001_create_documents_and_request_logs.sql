@@ -1,10 +1,12 @@
--- Database: arrise_api
--- Schema: public
+-- Database: arrise_vm_db
+-- Schema: arrise_api
 --
 -- Statically reviewed during development. Execution against PostgreSQL
 -- remains pending.
 
-CREATE TABLE IF NOT EXISTS documents (
+CREATE SCHEMA IF NOT EXISTS arrise_api;
+
+CREATE TABLE IF NOT EXISTS arrise_api.documents (
     document_id        UUID PRIMARY KEY,
     service             VARCHAR(64)  NOT NULL,
     document_name        VARCHAR(255) NOT NULL,
@@ -49,16 +51,16 @@ CREATE TABLE IF NOT EXISTS documents (
         )
 );
 
-CREATE INDEX IF NOT EXISTS idx_documents_correlation_id ON documents (correlation_id);
-CREATE INDEX IF NOT EXISTS idx_documents_sha256 ON documents (sha256);
-CREATE INDEX IF NOT EXISTS idx_documents_status ON documents (status);
-CREATE INDEX IF NOT EXISTS idx_documents_received_at ON documents (received_at);
-CREATE INDEX IF NOT EXISTS idx_documents_service ON documents (service);
+CREATE INDEX IF NOT EXISTS idx_documents_correlation_id ON arrise_api.documents (correlation_id);
+CREATE INDEX IF NOT EXISTS idx_documents_sha256 ON arrise_api.documents (sha256);
+CREATE INDEX IF NOT EXISTS idx_documents_status ON arrise_api.documents (status);
+CREATE INDEX IF NOT EXISTS idx_documents_received_at ON arrise_api.documents (received_at);
+CREATE INDEX IF NOT EXISTS idx_documents_service ON arrise_api.documents (service);
 
-CREATE TABLE IF NOT EXISTS request_logs (
+CREATE TABLE IF NOT EXISTS arrise_api.request_logs (
     request_id       UUID PRIMARY KEY,
     correlation_id     VARCHAR(128),
-    document_id           UUID NULL REFERENCES documents(document_id) ON DELETE SET NULL,
+    document_id           UUID NULL REFERENCES arrise_api.documents(document_id) ON DELETE SET NULL,
     method                  VARCHAR(10) NOT NULL,
     endpoint                 TEXT NOT NULL,
     source_system              VARCHAR(64),
@@ -80,8 +82,8 @@ CREATE TABLE IF NOT EXISTS request_logs (
         CHECK (result IN ('SUCCESS', 'CLIENT_ERROR', 'SERVER_ERROR'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs (created_at);
-CREATE INDEX IF NOT EXISTS idx_request_logs_correlation_id ON request_logs (correlation_id);
-CREATE INDEX IF NOT EXISTS idx_request_logs_document_id ON request_logs (document_id);
-CREATE INDEX IF NOT EXISTS idx_request_logs_http_status ON request_logs (http_status);
-CREATE INDEX IF NOT EXISTS idx_request_logs_result ON request_logs (result);
+CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON arrise_api.request_logs (created_at);
+CREATE INDEX IF NOT EXISTS idx_request_logs_correlation_id ON arrise_api.request_logs (correlation_id);
+CREATE INDEX IF NOT EXISTS idx_request_logs_document_id ON arrise_api.request_logs (document_id);
+CREATE INDEX IF NOT EXISTS idx_request_logs_http_status ON arrise_api.request_logs (http_status);
+CREATE INDEX IF NOT EXISTS idx_request_logs_result ON arrise_api.request_logs (result);
