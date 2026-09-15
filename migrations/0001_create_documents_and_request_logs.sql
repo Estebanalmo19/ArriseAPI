@@ -1,8 +1,7 @@
 -- Database: arrise_vm_db
 -- Schema: arrise_api
 --
--- Statically reviewed during development. Execution against PostgreSQL
--- remains pending.
+-- Validated against PostgreSQL 16 in the development environment.
 
 CREATE SCHEMA IF NOT EXISTS arrise_api;
 

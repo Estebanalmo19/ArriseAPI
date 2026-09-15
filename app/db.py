@@ -4,6 +4,13 @@ from typing import Any
 from fastapi import Request
 from psycopg_pool import AsyncConnectionPool
 
+# Recommended bound for how long startup waits for at least one usable
+# PostgreSQL connection before giving up (see app.main.lifespan). Kept
+# short so a misconfigured/unreachable database fails application startup
+# quickly instead of letting Uvicorn report "Application startup complete"
+# while connection attempts keep failing in the background.
+DB_POOL_READY_TIMEOUT = 10.0
+
 INSERT_DOCUMENT_SQL = """
     INSERT INTO arrise_api.documents (
         document_id, service, document_name, source_system, document_type,

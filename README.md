@@ -48,9 +48,31 @@ python -m pip install -r requirements-dev.txt
 
 ## Run Locally
 
-Run FastAPI bound to localhost:
+### Windows
+
+Use the bundled launcher instead of the ordinary `uvicorn` command:
 
 ```powershell
+.\venv\Scripts\python.exe run_local.py
+```
+
+`run_local.py` binds `app.main:app` to `127.0.0.1:8000`. Windows needs this
+launcher because plain `uvicorn.run()` (and `python -m uvicorn ...`) build
+their own event loop, which on Windows defaults to `ProactorEventLoop` -
+and Psycopg's async mode cannot run on `ProactorEventLoop`. `run_local.py`
+instead runs an explicit `SelectorEventLoop` via `asyncio.Runner(...)` and
+drives `uvicorn.Server(...).serve()` directly inside it, so async database
+calls work correctly during local development. This launcher is
+development-only: host and port are fixed, and it never reads `.env` files
+or credentials.
+
+### Linux (future Ubuntu deployment)
+
+On Linux, the default event loop is already selector-based, so the
+ordinary Uvicorn command is expected to work once deployment is
+implemented:
+
+```bash
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -141,6 +163,16 @@ Invoke-RestMethod -Uri http://127.0.0.1:8000/api/v1/documents `
 **Not production-deployable yet.** This section describes a local-development-only
 setup. Production database credentials will be retrieved from AWS SSM Parameter
 Store (SecureString) in a later increment - that retrieval is not implemented here.
+
+**Verified against a real development database.** The migration
+(`migrations/0001_create_documents_and_request_logs.sql`) and the
+application's PostgreSQL connection have been successfully executed and
+verified against a real PostgreSQL 16 development instance. An end-to-end
+run confirmed document upload, filesystem storage, `arrise_api.documents`
+metadata insertion, and `arrise_api.request_logs` request logging all
+working correctly together. Production SSM-based credential retrieval,
+authentication, Nginx/TLS, and deployment remain pending and are not
+covered by this verification.
 
 ### Database
 
